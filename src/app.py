@@ -45,7 +45,7 @@ if last_post_id == -1:
     print("Error occured while getting offset")
     exit(1)
 posts = []
-for post in get_posts(PAGE_ID, pages=2):
+for post in get_posts(PAGE_ID, pages=3):
     if int(post['post_id']) > int(last_post_id):
         posts.append({
             'post_id': post['post_id'],
