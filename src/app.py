@@ -41,8 +41,9 @@ producer = KafkaProducer(bootstrap_servers=BOOSTRAP_SERVER)
 
 
 last_post_id = get_last_message(consumer)
-print(last_post_id)
-exit()
+if last_post_id == -1:
+    print("Error occured while getting offset")
+    exit(1)
 posts = []
 for post in get_posts(PAGE_ID, pages=2):
     if int(post['post_id']) > int(last_post_id):
