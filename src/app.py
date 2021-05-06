@@ -13,20 +13,23 @@ PAGE_ID = os.environ.get('PAGE_ID', '')
 print("Starting up... ", datetime.now())
 
 def get_last_message(consumer):
-    partitions = consumer.partitions_for_topic(CONFIG_TOPIC)
-    if partitions == None:
-        return 0
-    for partition in partitions:
-        p = TopicPartition(CONFIG_TOPIC, partition)
-        mypartition = [p]
-        consumer.assign(mypartition)
-        last_pos = consumer.end_offsets(mypartition)
-        pos = last_pos[p]-1
-        if pos == -1: 
-            return 0
-        offset = OffsetAndMetadata(pos, b'')
-        consumer.commit(offsets={p: offset})
-    return int(next(consumer).value.decode('utf-8'))
+    try:
+        partitions = consumer.partitions_for_topic(CONFIG_TOPIC)
+        if partitions == None:
+            return -1
+        for partition in partitions:
+            p = TopicPartition(CONFIG_TOPIC, partition)
+            mypartition = [p]
+            consumer.assign(mypartition)
+            last_pos = consumer.end_offsets(mypartition)
+            pos = last_pos[p]-1
+            if pos == -1: 
+                return 0
+            offset = OffsetAndMetadata(pos, b'')
+            consumer.commit(offsets={p: offset})
+        return int(next(consumer).value.decode('utf-8'))
+    except:
+        return -1
 
 
 consumer = KafkaConsumer(bootstrap_servers=BOOSTRAP_SERVER,
@@ -38,8 +41,10 @@ producer = KafkaProducer(bootstrap_servers=BOOSTRAP_SERVER)
 
 
 last_post_id = get_last_message(consumer)
+print(last_post_id)
+exit()
 posts = []
-for post in get_posts(PAGE_ID, pages=3):
+for post in get_posts(PAGE_ID, pages=2):
     if int(post['post_id']) > int(last_post_id):
         posts.append({
             'post_id': post['post_id'],
@@ -68,6 +73,6 @@ else :
     current_post_id = max(item['post_id'] for item in posts)
     for item in posts:
         print("Updating... " + item['post_id'])
-        producer.send(POST_TOPIC, key=b'post_data', value=json.dumps(item).encode('utf-8')).get(timeout=30)
+        producer.send(POST_TOPIC, key=item['post_id'].encode('utf-8'), value=json.dumps(item).encode('utf-8')).get(timeout=30)
     producer.send(CONFIG_TOPIC, key=b'post_id', value=current_post_id.encode('utf-8')).get(timeout=30)
     print("Posts update completed.")
