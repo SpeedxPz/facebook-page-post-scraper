@@ -1,8 +1,12 @@
-from facebook_scraper import get_posts
+from facebook_scraper import get_posts, set_proxy
 from kafka import KafkaConsumer, TopicPartition, OffsetAndMetadata, KafkaProducer
 from datetime import datetime
 import os
 import json
+import io
+import requests
+from minio import Minio
+from minio.error import S3Error
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -12,8 +16,41 @@ CONFIG_TOPIC = os.environ.get('CONFIG_TOPIC', '')
 PAGE_ID = os.environ.get('PAGE_ID', '')
 POST_TOPIC = os.environ.get('POST_TOPIC', '')
 COOKIES_PATH = os.environ.get('COOKIE_PATH', '/opt/secret/cookies.json')
+PROXY_URL = os.environ.get('PROXY_URL', '')
+S3_ENDPOINT = os.environ.get('S3_ENDPOINT', '')
+S3_ACCESS_KEY = os.environ.get('S3_ACCESS_KEY', '')
+S3_SECRET_KEY = os.environ.get('S3_SECRET_KEY', '')
+S3_BUCKET = os.environ.get('S3_BUCKET', '')
 
 print("Starting up... ", datetime.now())
+client = Minio(
+    S3_ENDPOINT,
+    access_key=S3_ACCESS_KEY,
+    secret_key=S3_SECRET_KEY,
+)
+
+found = client.bucket_exists(S3_BUCKET)
+if not found:
+    print("S3 Initialize failed, Bucket not found")
+    exit(1)
+
+print("S3 Initialize completed")
+
+def get_s3_url_from_facebook_image(post_id, url):
+    try:
+        filename = str(post_id) + '.jpg'
+        r = requests.get(url, allow_redirects=True)
+        stream = io.BytesIO(r.content)
+        client.put_object(
+            S3_BUCKET, 
+            filename, 
+            stream, 
+            length=len(r.content)
+        )
+        return "https://" + S3_ENDPOINT + "/" + S3_BUCKET + "/" + filename
+    except:
+        print("Unable to convert image url for " + str(post_id) + " | " + url)
+        return url
 
 def get_last_message(consumer):
     try:
@@ -35,7 +72,9 @@ def get_last_message(consumer):
     except:
         return -1
 
-
+if PROXY_URL != '':
+    print("Using proxy: " + str(PROXY_URL))
+    set_proxy(PROXY_URL)
 consumer = KafkaConsumer(bootstrap_servers=BOOSTRAP_SERVER,
                          group_id=CONFIG_CONSUMER_ID,
                          auto_offset_reset='latest',
@@ -49,16 +88,20 @@ if last_post_id == -1:
     print("Error occured while getting offset")
     exit(1)
 posts = []
-facebook_posts = list(get_posts(PAGE_ID, pages=3))
+
+facebook_posts = list(get_posts(PAGE_ID, pages=3, cookies=COOKIES_PATH))
 print("Facebook Fetched Post: " + str(len(facebook_posts)))
 for post in facebook_posts:
     current_post_id = post['post_id']
     post_timestamp = int(datetime.strptime(str(post['time']), '%Y-%m-%d %H:%M:%S').timestamp())
     if int(current_post_id) > int(last_post_id):
+        image = post['image']
+        if post['image'] != '':
+            image = get_s3_url_from_facebook_image(post['post_id'],post['image'])
         posts.append({
             'post_id': post['post_id'],
             'text': post['text'],
-            'image': post['image'],
+            'image': image,
             'image_lowquality': post['image_lowquality'],
             'post_url': post['post_url'],
             'username': post['username'],
