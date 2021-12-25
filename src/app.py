@@ -3,12 +3,15 @@ from kafka import KafkaConsumer, TopicPartition, OffsetAndMetadata, KafkaProduce
 from datetime import datetime
 import os
 import json
+from dotenv import load_dotenv
+load_dotenv()
 
-POST_TOPIC = os.environ.get('POST_TOPIC', '')
-CONFIG_TOPIC = os.environ.get('CONFIG_TOPIC', '')
-CONFIG_CONSUMER_ID = os.environ.get('CONFIG_CONSUMER_ID', '')
 BOOSTRAP_SERVER = os.environ.get('BOOSTRAP_SERVER', '')
+CONFIG_CONSUMER_ID = os.environ.get('CONFIG_CONSUMER_ID', '')
+CONFIG_TOPIC = os.environ.get('CONFIG_TOPIC', '')
 PAGE_ID = os.environ.get('PAGE_ID', '')
+POST_TOPIC = os.environ.get('POST_TOPIC', '')
+COOKIES_PATH = os.environ.get('COOKIE_PATH', '/opt/secret/cookies.json')
 
 print("Starting up... ", datetime.now())
 
@@ -27,6 +30,7 @@ def get_last_message(consumer):
                 return 0
             offset = OffsetAndMetadata(pos, b'')
             consumer.commit(offsets={p: offset})
+            
         return int(next(consumer).value.decode('utf-8'))
     except:
         return -1
@@ -45,8 +49,12 @@ if last_post_id == -1:
     print("Error occured while getting offset")
     exit(1)
 posts = []
-for post in get_posts(PAGE_ID, pages=3):
-    if int(post['post_id']) > int(last_post_id):
+facebook_posts = list(get_posts(PAGE_ID, pages=3))
+print("Facebook Fetched Post: " + str(len(facebook_posts)))
+for post in facebook_posts:
+    current_post_id = post['post_id']
+    post_timestamp = int(datetime.strptime(str(post['time']), '%Y-%m-%d %H:%M:%S').timestamp())
+    if int(current_post_id) > int(last_post_id):
         posts.append({
             'post_id': post['post_id'],
             'text': post['text'],
@@ -58,6 +66,7 @@ for post in get_posts(PAGE_ID, pages=3):
             'shared_post_url': post['shared_post_url'],
             'shared_user_id': post['shared_user_id'],
             'time': str(post['time']),
+            'timestamp': post_timestamp,
         })
 
 def get_post_id(post):
@@ -71,9 +80,9 @@ if len(posts) <= 0:
     print("No new post available")
 else :
     print("New post in total " + str(len(posts)))
-    current_post_id = max(item['post_id'] for item in posts)
+    current_post_id = str(max(item['post_id'] for item in posts))
     for item in posts:
-        print("Updating... " + item['post_id'])
+        print("Updating... " + str(item['post_id']))
         producer.send(POST_TOPIC, key=item['post_id'].encode('utf-8'), value=json.dumps(item).encode('utf-8')).get(timeout=30)
     producer.send(CONFIG_TOPIC, key=b'post_id', value=current_post_id.encode('utf-8')).get(timeout=30)
     print("Posts update completed.")
